@@ -3,6 +3,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.utils import to_categorical
+from random import randint
 import random
 
 
@@ -19,14 +20,35 @@ NUM_CLASSES = 10
 IMAGE_SIZE = 784
 
 class Genetic():
+
+    genCount = 0
+    fittest = None
+    secondFittest = None
+
     def __init__(self, inputSize, outputSize, neuronsPerLayer):
         self.inputSize = inputSize
         self.outputSize = outputSize
         self.neuronsPerLayer = neuronsPerLayer
+        self.population = Population()
 
         # Initial Population
         self.W1 = np.random.randn(self.inputSize, self.neuronsPerLayer)
         self.W2 = np.random.randn(self.neuronsPerLayer, self.outputSize)
+
+    #Selection
+    def __selection(self):
+        self.fittest = self.population.getFittest()
+        self.secondFittest = self.population.getSecondFittest()
+
+    #Crossover
+    def __crossover(self):
+        value = randint(0, self.population.individuals[0].geneLength)
+        for i in range(0, value):
+            temp = self.fittest.genes[i];
+            self.fittest.genes[i] = self.secondFittest.genes[i];
+            self.secondFittest.genes[i] = temp;
+
+
 
 #Individual class
 class Individual():
