@@ -12,6 +12,8 @@ random.seed(1618)
 np.random.seed(1618)
 tf.random.set_seed(1618)
 
+# tf.enable_eager_execution()
+
 # Disable some troublesome logging.
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
@@ -25,11 +27,13 @@ class Genetic():
     fittest = None
     secondFittest = None
 
-    def __init__(self, inputSize, outputSize, neuronsPerLayer):
+    def __init__(self, inputSize, outputSize, neuronsPerLayer, data):
         self.inputSize = inputSize
         self.outputSize = outputSize
         self.neuronsPerLayer = neuronsPerLayer
         self.population = Population()
+        self.population.initializePopulation(data)
+        self.mutate_factor = .1
 
         # Initial Population
         self.W1 = np.random.randn(self.inputSize, self.neuronsPerLayer)
@@ -44,9 +48,60 @@ class Genetic():
     def __crossover(self):
         value = randint(0, self.population.individuals[0].geneLength)
         for i in range(0, value):
-            temp = self.fittest.genes[i];
-            self.fittest.genes[i] = self.secondFittest.genes[i];
-            self.secondFittest.genes[i] = temp;
+            temp = self.fittest.gene[i]
+            self.fittest.gene[i] = self.secondFittest.gene[i]
+            self.secondFittest.gene[i] = temp
+
+    #Mutation
+    def __mutation(self):
+        mutationPoint = randint(0, self.population.individuals[0].geneLength)
+
+        self.fittest.genes[mutationPoint] = random.random()
+
+        mutationPoint = randint(0, self.population.individuals[0].geneLength)
+
+        self.secondFittest.genes[mutationPoint] = random.random()
+
+    #Get fittest offspring
+    def __getFittestOffspring(self):
+        if self.fittest.fitness > self.secondFittest.fitness:
+            return self.fittest
+        return self.secondFittest
+
+    #Replace least fittest individual from most fittest offspring
+    def __addFittestOffspring(self):
+
+        #Update fitness values of offspring
+        self.fittest.calcFitness()
+        self.secondFittest.calcFitness()
+
+        #Get index of least fit individual
+        leastFittestIndex = self.population.getLeastFittestIndex()
+
+        #Replace least fittest individual from most fittest offspring
+        self.population.individuals[leastFittestIndex] = self.__getFittestOffspring()
+
+    def train(self):
+
+        loop = 0
+
+        while loop < 1:
+
+            self.__selection()
+            self.__crossover()
+
+            n = random.random()
+
+            if n < self.mutate_factor:
+                self.__mutation()
+
+            self.__addFittestOffspring()
+            self.population.calculateFitness()
+            loop += 1
+
+    def optimize(self):
+        return self.fittest
+
 
 
 
@@ -55,35 +110,39 @@ class Individual():
 
     fitness = 0
     geneLength = 0
+    preds = None
 
-    def __init__(self, inputSize, outputSize, neuronsPerLayer):
+    def __init__(self, inputSize, outputSize, neuronsPerLayer, data):
 
         self.fitness = 0
         self.inputSize = inputSize
         self.outputSize = outputSize
         self.neuronsPerLayer = neuronsPerLayer
+        self.data = data
 
         # Initial Population
         self.W1 = np.random.randn(self.inputSize, self.neuronsPerLayer)
         self.W2 = np.random.randn(self.neuronsPerLayer, self.outputSize)
-        self.gene = self.W1.flatten() + self.W2.flatten()
+        # self.gene = self.W1.flatten() + self.W2.flatten()
+        self.gene = np.concatenate((self.W1.flatten(), self.W2.flatten()))
         self.geneLength = len(self.gene)
 
     # Forward pass.
     def __forward(self, input):
         layer1 = keras.activations.sigmoid(np.dot(input, self.W1))
-        layer2 = keras.activations.sigmoid(np.dot(input, self.W1))
+        layer2 = keras.activations.sigmoid(np.dot(layer1, self.W2))
         return layer1, layer2
 
     # Predict.
     def predict(self, xVals):
         _, layer2 = self.__forward(xVals)
-        return layer2
+        self.preds = layer2.numpy()
+        return layer2.numpy()
 
-    def __calcFitness(self, data, preds):
-        preds = self.__modPreds(preds)
+    def calcFitness(self):
+        preds = self.__modPreds(self.predict(self.data[0]))
         fitness = 0
-        xTest, yTest = data
+        xTest, yTest = self.data
         table = dict.fromkeys(range(10), 0)
         predsmod = np.zeros(preds.shape[0])
         yTestmod = np.zeros(yTest.shape[0])
@@ -93,8 +152,9 @@ class Individual():
             # Add to dictionary
             table[preds[i].argmax(axis=0)] += 1
             if np.array_equal(preds[i], yTest[i]):   fitness = fitness + 1
+        self.fitness = fitness
 
-    def __modPreds(preds):
+    def __modPreds(self, preds):
         modout = np.zeros(preds.shape)
         for i in range(0, preds.shape[0]):
             modout[i][preds[i].argmax(axis=0)] = 1
@@ -104,17 +164,20 @@ class Individual():
 class Population():
 
     popSize = 10
-    individuals = []
+    individuals = [None] * 10
     fittest = 0
 
-    def initializePopulation(self):
+    def initializePopulation(self, data):
+        self.data = data
         for i in range(0, self.popSize):
             # TODO only has static size for mnist
-            self.individuals[i] = Individual(784, 10, 512)
+            self.individuals[i] = Individual(784, 10, 512, data)
+            self.individuals[i].data = data[0]
+        self.calculateFitness()
 
     #Get the fittest individual
     def getFittest(self):
-        maxFit = min()
+        maxFit = -1
         maxFitIndex = 0
         for i in range(0, self.popSize):
             if maxFit <= self.individuals[i].fitness:
@@ -134,6 +197,26 @@ class Population():
             elif self.individuals[i].fitness > self.individuals[maxFit2].fitness:
                 maxFit2 = i
         return self.individuals[maxFit2]
+
+    #Get index of least fittest individual
+    def getLeastFittestIndex(self):
+        minFitVal = -1
+        minFitIndex = 0
+        for i in range(0, self.popSize):
+            if minFitVal >= self.individuals[i].fitness:
+                minFitVal = self.individuals[i].fitness
+                minFitIndex = i
+
+        return minFitIndex
+
+    #Calculate fitness of each individual
+    def calculateFitness(self):
+
+        for i in range(0, self.popSize):
+            self.individuals[i].calcFitness()
+
+        self.getFittest()
+
 
 #=========================<Pipeline Functions>==================================
 
@@ -164,6 +247,10 @@ def preprocessData(raw):
 def main():
     raw = getRawData()
     data = preprocessData(raw)
+    g = Genetic(784, 10, 512, data)
+    g.train()
+    fitest = g.optimize()
+    print(fitest.fitness / 60000.0)
 
 if __name__ == '__main__':
     main()
